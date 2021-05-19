@@ -11,9 +11,30 @@ PoseNet example using p5.js
 let video;
 let poseNet;
 let poses = [];
+let goodpoints = [];
+
+let targetPose = null;
+
+function loadTarget() {
+
+    var xobj = new XMLHttpRequest();
+    xobj.overrideMimeType("application/json");
+    xobj.open('GET', 'target.json', true); // Replace 'appDataServices' with the path to your file
+    xobj.onreadystatechange = function () {
+        if (xobj.readyState == 4 && xobj.status == "200") {
+            // Required use of an anonymous callback as .open will NOT return a value but simply returns undefined in asynchronous mode
+            //callback();
+            // Add target to drawing
+            targetPose = JSON.parse(xobj.responseText);
+            targetPose.target = true;
+        }
+    };
+    xobj.send(null);
+}
 
 function setup() {
-    createCanvas(1280, 960);
+    let scale = 1.5
+    createCanvas(640 * scale, 480 * scale);
     video = createCapture(VIDEO);
     video.size(width, height);
 
@@ -26,6 +47,8 @@ function setup() {
     });
     // Hide the video element, and just show the canvas
     video.hide();
+
+    loadTarget();
 }
 
 function modelReady() {
@@ -40,26 +63,68 @@ function draw() {
     drawSkeleton();
 }
 
+function Point(x, y) {
+    this.x = x;
+    this.y = y;
+
+
+    this.distanceTo = function (point) {
+        var distance = Math.sqrt((Math.pow(point.x - this.x, 2)) + (Math.pow(point.y - this.y, 2)))
+        return distance;
+    };
+}
+
+function pointMatches(part) {
+    if (!goodpoints[part]) return false;
+    let actual = new Point(goodpoints[part].position.x, goodpoints[part].position.y);
+    let target = new Point(targetPose.pose.keypoints[part].position.x, targetPose.pose.keypoints[part].position.y);
+
+    let distance = actual.distanceTo(target);
+    if (distance < 40) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+let maxMatches = 0;
+
 // A function to draw ellipses over the detected keypoints
 function drawKeypoints() {
+    if (!targetPose) return;
+    poses.push(targetPose);
+
     // Loop through all the poses detected
     for (let i = 0; i < poses.length; i += 1) {
         // For each pose detected, loop through all the keypoints
         const pose = poses[i].pose;
-        for (let j = 0; j < pose.keypoints.length; j += 1) {
+        goodpoints = [];
+        for (let j = 5; j < 13; j++) {
             // A keypoint is an object describing a body part (like rightArm or leftShoulder)
             const keypoint = pose.keypoints[j];
             // Only draw an ellipse is the pose probability is bigger than 0.2
             if (keypoint.score > 0.2) {
-                fill(255, 0, 0);
+                if (poses[i].pose.target) {
+                    fill(0, 255, 0);
+                } else {
+                    fill(255, 0, 0);
+                    goodpoints[j] = keypoint;
+                }
                 noStroke();
                 ellipse(keypoint.position.x, keypoint.position.y, 10, 10);
             }
         }
-        if (pose.rightWrist.y < 200) {
-            document.querySelector("#debug-right").textContent = "RIGHT";
-        } else {
-            document.querySelector("#debug-right").textContent = "";
+
+        // Compare only main body sections
+        let matches = 0;
+        for (let i = 5; i < 12; i++) {
+            if (pointMatches(i)) {
+                matches++;
+            }
+        }
+
+        if (matches == 7) {
+            document.querySelector("body").style.background = "green";
         }
     }
 }
@@ -73,7 +138,11 @@ function drawSkeleton() {
         for (let j = 0; j < skeleton.length; j += 1) {
             const partA = skeleton[j][0];
             const partB = skeleton[j][1];
-            stroke(255, 0, 0);
+            if (poses[i].pose.target) {
+                stroke(0, 255, 0);
+            } else {
+                stroke(255, 0, 0);
+            }
             line(partA.position.x, partA.position.y, partB.position.x, partB.position.y);
         }
     }
